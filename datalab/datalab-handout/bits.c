@@ -241,7 +241,19 @@ int conditional(int x, int y, int z) {
  *   Rating: 3
  */
 int isLessOrEqual(int x, int y) {
-  return 2;
+    //先比x的sign bit跟y的sign bit
+    int signx = (x >> 31) & 1;
+    int signy = (y >> 31) & 1;
+    int signdiff = signx ^ signy; //如果bit相同為0不同為1
+    int diff = x + (~y + 1);  //x - y,~y + 1為-y
+    int sd = (diff >> 31) & 1;  //取diff的sign bit,如果為1代表x < y
+    int equal = !(x ^ y); //兩數相同的情況 相同為1不同為0
+    int cond1 = (signdiff & signx); //x跟y不同號的情況
+    //e.g. x = -3,y = 5:
+    //signx = 1,signy = 0,signdiff = 1,cond1 = 1
+    int cond2 = signdiff ^ 1; //x跟y同號的情況XOR會為1
+    int cond3 = sd | equal; //基於同號的前提，x < y 或 x == y，也就是 x <= y
+    return cond1 | (cond2 & cond3);
 }
 //4
 /* 
