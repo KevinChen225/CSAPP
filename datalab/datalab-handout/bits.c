@@ -265,7 +265,12 @@ int isLessOrEqual(int x, int y) {
  *   Rating: 4 
  */
 int logicalNeg(int x) {
-  return 2;
+  //x非 0，x 和 -x 至少有一個是負數
+  //e.g. 0101 = 5 1011 = -5
+  int a = ~x + 1; // -x
+  int signbit = (a | x) >> 31; // x = 0得0，非0得-1 
+  //a OR x的 sign bit為1時右移31個bit補1得到 -> (11111111 11111111 11111111 11111111) = -1
+  return signbit + 1;
 }
 /* howManyBits - return the minimum number of bits required to represent x in
  *             two's complement
