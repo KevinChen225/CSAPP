@@ -346,8 +346,38 @@ int howManyBits(int x) {
  *   Rating: 4
  */
 unsigned floatScale2(unsigned uf) {
-    
-  return 2;
+  // [ sign ][ exponent ][ fraction ]
+  //    1         8           23
+  // 1 sign bit 8 exponent bit 23 fraction bit，exp = E + 127
+  // 取最高位
+  unsigned signBit = (uf >> 31) & 1;
+
+  // 取中間 8 bit
+  unsigned exp = ((uf >> 23) & 0xFF);
+
+  // 取右邊 23 bit
+  unsigned frac = uf & 0x7FFFFF;
+
+  // NaN
+  if(exp == 0xFF)
+    return uf;
+  
+  // uf = 0
+  if(exp == 0 && frac == 0)
+    return uf;
+
+  // denormalize 
+  if(exp == 0 && frac != 0){
+    frac = frac << 1; // *2
+    return (signBit << 31) | frac;
+  }
+  // 避免把 overflow 錯誤做成 NaN，確保結果是 inf
+  if(exp == 0xFE) {
+      return (signBit << 31) | (0xFF << 23);
+  }
+  // normalize
+  exp++;
+  return (signBit << 31) | (exp << 23) | frac;
 }
 /* 
  * floatFloat2Int - Return bit-level equivalent of expression (int) f
@@ -362,7 +392,139 @@ unsigned floatScale2(unsigned uf) {
  *   Rating: 4
  */
 int floatFloat2Int(unsigned uf) {
-  return 2;
+  // 取最高位
+  unsigned signBit = (uf >> 31) & 1;
+
+  // 取中間 8 bit
+  unsigned exp = ((uf >> 23) & 0xFF);
+
+  // 取右邊 23 bit
+  unsigned frac = uf & 0x7FFFFF;
+
+  // exp 是 unsigned，轉成 int 好點
+  int E = (int)exp - 127;
+  
+  // uf = 0
+  if(exp == 0 && frac == 0)
+    return 0;
+  
+  // NaN 或 Inf
+  if(exp == 0xFF)
+    return 1 << 31; // 0x80000000
+  
+  // frac 變回去，把隱藏的 1 補回來 
+  // e.g. 1.101 實際儲存的地方只有101...
+  frac = (frac | (1 << 23));
+
+  // 如果 E < 0 代表這個數字一定 < 1，轉 int 會直接切掉小數
+  if(E < 0)
+    return 0;
+  
+  // 代表結果超過 int 能表示的範圍，返回 0x80000000u
+  if(E >= 31)
+    return 1u << 31;
+  // ============================================
+    // 情況 1：E < 23
+    // ============================================
+    //
+    // 例如 E = 2：
+    //
+    // float：
+    //
+    //     1.101 × 2^2
+    //
+    // 小數點右移 2 格：
+    //
+    //     110.1
+    //
+    // 轉 int：
+    //
+    //     110₂ = 6
+    //
+    //
+    // 但是 frac 在程式裡其實長這樣：
+    //
+    //     110100000000000000000000
+    //        ↑
+    //        後面還有很多 fraction bits
+    //
+    // frac 原本有 23 個小數 bits，
+    // 但 E = 2 代表只有前面 2 個 bits 移到小數點左邊。
+    //
+    // 所以還剩：
+    //
+    //     23 - 2 = 21
+    //
+    // 個 bits 要丟掉。
+    //
+    // 因此右移 21：
+    //
+    //     frac >>= 21;
+    //
+    // 最後剩：
+    //
+    //     110₂ = 6
+    //
+    if (E < 23) {
+        frac >>= (23 - E);
+    }
+
+
+    // ============================================
+    // 情況 2：E == 23
+    // ============================================
+    //
+    // 例如：
+    //
+    //     1.101 × 2^23
+    //
+    // frac 本來就有 23 個 fraction bits。
+    //
+    // 現在 × 2^23，
+    // 剛好把小數點完整移過這 23 個 bits。
+    //
+    // 所以：
+    //
+    //     E - 23 = 0
+    //
+    // 等於：
+    //
+    //     frac <<= 0;
+    //
+    // 完全不用移動。
+    //
+    //
+    // ============================================
+    // 情況 3：E > 23
+    // ============================================
+    //
+    // 例如 E = 25：
+    //
+    //     1.101 × 2^25
+    //
+    // frac 只有 23 個 fraction bits，
+    // 但是現在要把小數點往右移 25 格。
+    //
+    // 已經移完原本的 23 格後，
+    // 還差：
+    //
+    //     25 - 23 = 2
+    //
+    // 格。
+    //
+    // 所以要在右邊補兩個 0，
+    // 也就是左移 2：
+    //
+    //     frac <<= 2;
+    //
+    else {
+        frac <<= (E - 23);
+    }
+    // 如果負的返回 2 的補數
+    if(signBit){
+      return ~frac + 1;
+    }
+    return frac;
 }
 /* 
  * floatPower2 - Return bit-level equivalent of the expression 2.0^x
@@ -378,5 +540,24 @@ int floatFloat2Int(unsigned uf) {
  *   Rating: 4
  */
 unsigned floatPower2(int x) {
-    return 2;
+  // 最小 normal 是 0.00000000000000000000001 × 2^-126 
+  // 0.00000000000000000000001 = 2^-23
+  // 2^(-23 - 126) = 2^-149
+  if(x < -149)
+    return 0;
+  // normal number 最小的 exponent bits 是 00000001 也就是 1
+  // 真正的 exponent E = 1 - 127 = -126
+  // 而 normal number 最大的 exponent bits 是 11111110 也就是 254
+  // 真正的 exponent E = 254 - 127 = 127
+
+  //denormal
+  if(x < -126){
+        return 1u << (x + 149);
+    }
+  //normal
+  if(x <= 127){
+        return (x + 127) << 23;
+    }
+  // Inf
+  return 0xFFu << 23;
 }
